@@ -1,12 +1,16 @@
-﻿using Labb3_IdentityAPI.Models;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
 namespace Labb3_IdentityAPI.Data
 {
-    public class LoginContext : DbContext
+    public class LoginContext : IdentityDbContext<IdentityUser>
     {
         public LoginContext(DbContextOptions<LoginContext> options) : base(options) {}
 
-        public DbSet<Login> Logins { get; set; }
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);  
+        }
     }
 }

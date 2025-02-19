@@ -1,7 +1,14 @@
 
 using Labb3_IdentityAPI.Data;
 using Labb3_IdentityAPI.Models;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace Labb3_IdentityAPI
 {
@@ -13,6 +20,28 @@ namespace Labb3_IdentityAPI
 
             builder.Services.AddDbContext<LoginContext>(options =>
              options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+            builder.Services.AddIdentity<IdentityUser, IdentityRole>()
+                .AddEntityFrameworkStores<LoginContext>()
+                .AddDefaultTokenProviders();
+
+            var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key") ?? builder.Configuration["Jwt:Key"];
+
+            var key = Encoding.UTF8.GetBytes(jwtKey);
+
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    options.RequireHttpsMetadata = false;
+                    options.SaveToken = true;
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = new SymmetricSecurityKey(key),
+                        ValidateIssuer = false,
+                        ValidateAudience = false
+                    };
+                });
 
             // Add services to the container.
             builder.Services.AddAuthorization();
@@ -30,35 +59,49 @@ namespace Labb3_IdentityAPI
                 app.UseSwaggerUI();
             }
 
+            app.UseAuthentication();
+
+            app.UseAuthorization();
+
             app.UseHttpsRedirection();
 
             app.UseAuthorization();
 
-            app.MapPost("/login", async (LoginContext db, Login login) =>
+            app.MapPost("/login", async (UserManager<IdentityUser> userManager, IConfiguration config, [FromBody] LoginModel model) =>
             {
-                var user = await db.Logins.FirstOrDefaultAsync(u => u.Username == login.Username);
-
-                if (user == null || user.Password != login.Password)
+                var user = await userManager.FindByNameAsync(model.UserName);
+                if (user == null || !await userManager.CheckPasswordAsync(user, model.Password))
                 {
                     return Results.Unauthorized();
                 }
 
-                return Results.Ok(new { Message = "Login successful" });
-            });
-
-
-            app.MapPost("/register", async (LoginContext db, Login login) =>
-            {
-                if (await db.Logins.AnyAsync(u => u.Username == login.Username))
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var key = Encoding.UTF8.GetBytes(config["Jwt:Key"]);
+                var tokenDescriptor = new SecurityTokenDescriptor
                 {
-                    return Results.BadRequest("Username already exists." );
-                }
+                    Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, user.UserName) }),
+                    Expires = DateTime.UtcNow.AddHours(1),
+                    SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+                };
+                var token = tokenHandler.CreateToken(tokenDescriptor);
 
-                db.Logins.Add(login);
-                await db.SaveChangesAsync();
-                return Results.Ok(new { Message = "User registered successfully!" });
+                return Results.Ok(new { Token = tokenHandler.WriteToken(token) });
+            });
+                
+
+            app.MapPost("/register", async (UserManager<IdentityUser> userManager, [FromBody] RegisterModel model) =>
+            {
+                var user = new IdentityUser { UserName = model.UserName, Email = model.Email };
+                var result = await userManager.CreateAsync(user, model.Password);
+
+                return result.Succeeded ? Results.Ok("User created!") : Results.BadRequest(result.Errors);
 
             });
+
+            app.MapGet("/protected", (HttpContext context) =>
+            {
+                return Results.Ok($"{context.User.Identity?.Name}, has access to the protected page!");
+            }).RequireAuthorization();
 
 
             app.Run();
