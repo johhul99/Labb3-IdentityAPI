@@ -57,13 +57,17 @@ namespace Labb3_IdentityAPI
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
+
             }
 
             app.UseAuthentication();
 
             app.UseAuthorization();
 
-            app.UseHttpsRedirection();
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
 
             app.UseAuthorization();
 
